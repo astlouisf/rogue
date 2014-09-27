@@ -1,0 +1,26 @@
+(define x #f)
+(define y #t)
+(define A 65)
+(define B 66)
+(define lf 10)
+
+(%putchar (if (or) A B))
+(%putchar (if (or x) A B))
+(%putchar (if (or y) A B))
+(%putchar (if (or x x) A B))
+(%putchar (if (or x y) A B))
+(%putchar (if (or y x) A B))
+(%putchar (if (or y y) A B))
+(%putchar (if (or x x x) A B))
+(%putchar (if (or x x y) A B))
+(%putchar (if (or x y x) A B))
+(%putchar (if (or x y y) A B))
+(%putchar (if (or y x x) A B))
+(%putchar (if (or y x y) A B))
+(%putchar (if (or y y x) A B))
+(%putchar (if (or y y y) A B))
+(%putchar lf) ;;@ BBABAAABAAAAAAA
+
+(%putchar (or A A A B))
+(%putchar (or B A A A))
+(%putchar lf) ;;@ AB

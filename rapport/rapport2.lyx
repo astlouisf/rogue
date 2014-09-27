@@ -1,0 +1,922 @@
+#LyX 2.0 created this file. For more info see http://www.lyx.org/
+\lyxformat 413
+\begin_document
+\begin_header
+\textclass amsart
+\use_default_options true
+\begin_modules
+theorems-ams
+eqs-within-sections
+figs-within-sections
+\end_modules
+\maintain_unincluded_children false
+\language canadien
+\language_package babel
+\inputencoding auto
+\fontencoding global
+\font_roman default
+\font_sans default
+\font_typewriter cmtt
+\font_default_family default
+\use_non_tex_fonts false
+\font_sc false
+\font_osf false
+\font_sf_scale 100
+\font_tt_scale 100
+
+\graphics default
+\default_output_format default
+\output_sync 0
+\bibtex_command default
+\index_command default
+\paperfontsize default
+\spacing single
+\use_hyperref false
+\papersize default
+\use_geometry false
+\use_amsmath 1
+\use_esint 1
+\use_mhchem 1
+\use_mathdots 1
+\cite_engine basic
+\use_bibtopic false
+\use_indices false
+\paperorientation portrait
+\suppress_date false
+\use_refstyle 1
+\index Index
+\shortcut idx
+\color #008000
+\end_index
+\secnumdepth 3
+\tocdepth 3
+\paragraph_separation indent
+\paragraph_indentation default
+\quotes_language english
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+\tracking_changes false
+\output_changes false
+\html_math_output 0
+\html_css_as_file 0
+\html_be_strict false
+\end_header
+
+\begin_body
+
+\begin_layout Title
+IFT3065 - Rapport Phase 2
+\end_layout
+
+\begin_layout Author
+Alexandre St-Louis Fortier
+\end_layout
+
+\begin_layout Author
+Emmanuel Bengio
+\end_layout
+
+\begin_layout Section*
+Résumé
+\end_layout
+
+\begin_layout Standard
+Le rapport suivant traite de la deuxième phase de l'écriture du compilateur
+ rogue.
+ Cette phase visait à obtenir un coeur fonctionnel pour le langage scheme
+ incluant l'élaboration d'une librairie standard et d'un expanseur de macro,
+ la gestion correcte de la mémoire dans le contexte d'un langage fonctionnel
+ ainsi de générer une phase de compilation JIT.
+ Le rapport tente d'expliquer le fonctionnement des différentes parties
+ ajoutées lors de cette phase du projet et les différents choix adoptés
+ et présente les problèmes rencontré lors du dévelopement.
+\end_layout
+
+\begin_layout Section*
+Associateur de Patrons
+\begin_inset ERT
+status open
+
+\begin_layout Plain Layout
+
+
+\backslash
+
+\backslash
+
+\end_layout
+
+\end_inset
+
+[utils/pattern-matching.scm]
+\end_layout
+
+\begin_layout Standard
+Pour faciliter l'écriture future de plusieurs des composantes du compilateur,
+ une macro d'association de patrons, basée sur du code de Marc Feeley, a
+ été développée.
+ La première phase du compilateur en bénéficiant est l'expanseur de macro.
+\end_layout
+
+\begin_layout Standard
+Cette macro accepte du code de la forme suivante:
+\end_layout
+
+\begin_layout Standard
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(match <expression>
+\end_layout
+
+\begin_layout Plain Layout
+
+ {(<patron> [where <expression>] <expression>)})
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Un <pattern> est ici une une expression scheme.
+ La macro tente simplement de faire concorder les symboles de l'expression
+ avec ceux des patrons en partant avec celui du haut.
+ Par défaut, les symboles d'un patron sont considérés comme des identifiants
+ auxquels seront liés les symboles de l'expression afin de pouvoir les utiliser
+ dans l'expression de la branche.
+ Toute idetifiant valide peut être utilisé pour lier les variables d'une
+ expression à un patron sauf le caractère sous-ligné qui a une fonctionnalité
+ spéciale que nous verront un peux plus tard.
+\end_layout
+
+\begin_layout Standard
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(match '(a b c d e)
+\end_layout
+
+\begin_layout Plain Layout
+
+ ((v w x)      "non") ;; pas assez d'arguments
+\end_layout
+
+\begin_layout Plain Layout
+
+ ((v w x y z ) "oui") ;; lie les symboles au variables 
+\end_layout
+
+\begin_layout Plain Layout
+
+                      ;; v <= 'a, w <= 'b, ...
+\end_layout
+
+\begin_layout Plain Layout
+
+ ((v .
+ w)      "non") ;; oui si le 2e patron avait été
+\end_layout
+
+\begin_layout Plain Layout
+
+                      ;; absent
+\end_layout
+
+\end_inset
+
+Il est à noter que les patrons doivent êtres de la même longueur.
+ La syntaxe avec un point peut être utilisé pour des patrons de liste de
+ longueur inconnue.
+\end_layout
+
+\begin_layout Standard
+Lorsqu'on veut comparer les symboles du patron à ceux de l'expression au
+ lieu de les lier à des identifiants, il faut spécifer une telle comparaison
+ par l'ajout d'une apostrophe devant le symbole à comparer.
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(match '(a b c)
+\end_layout
+
+\begin_layout Plain Layout
+
+ (('a .
+ rest) "oui")) ;; rest <= '(b c)
+\end_layout
+
+\end_inset
+
+S'il a été mentionné précédemment que le caractère sous-ligné est un cas
+ spécial, c'est parce qu'il agit comme une variable, mais il n'engendre
+ pas le code nécessaire pour effectuer une liaison.
+ Un patron ne contenant que le caractère sous-ligné agit effectivement comme
+ un cas par défaut.
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(match <n'importe quoi>
+\end_layout
+
+\begin_layout Plain Layout
+
+ (_ "oui")) ;; attrape tout
+\end_layout
+
+\end_inset
+
+Une autre extension intéressante à la syntaxe de base de l'association de
+ patron est la possibilité d'ajouter une clause where qui permet en fait
+ d'ajouter une condition à l'utilisation d'une certaine branche.
+ Il est à noter que les symboles liés à un identifiant du patron peuvent
+ être utilisé à l'intérieur d'une clause where.
+\end_layout
+
+\begin_layout Standard
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(match a
+\end_layout
+
+\begin_layout Plain Layout
+
+ (_ where (number? a) "est numérique")
+\end_layout
+
+\begin_layout Plain Layout
+
+ (_                   "est autre chose"))
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Subsection*
+Stratégie lié à l'efficacité de l'associateur de patron
+\end_layout
+
+\begin_layout Standard
+Un des problèmes rencontré lors de l'élaboration de l'associateur de patrons
+ a été l'explosion des branches.
+ Le code généré par l'associateur de patrons a une tendance à être une série
+ de tests dont les branches «sinon» étaient répétées.
+ Le problème d'explosion était si grand qu'il était rendu impossible de
+ compiler le compilateur dû à une expression match un peut trop grande.
+ Pour corriger cette déficiance, l'associateur de patrons crée maintenant
+ des «thunks» référencés pour les branches «sinon» et les branches font
+ seulement un appel au «thunk».
+\end_layout
+
+\begin_layout Section*
+Expanseur de Macro
+\begin_inset ERT
+status open
+
+\begin_layout Plain Layout
+
+
+\backslash
+
+\backslash
+
+\end_layout
+
+\end_inset
+
+ [expand.scm]
+\end_layout
+
+\begin_layout Standard
+Suite à la deuxième phase de développement du compilateur, l'expanseur de
+ macro bénéficie d'un rôle primordial dans la transformation du code ainsi
+ que dans sont analyse.
+\end_layout
+
+\begin_layout Subsection*
+Expanseur de macro comme mécannisme de génération de représentation intermédiair
+e.
+\end_layout
+
+\begin_layout Standard
+Un des premier but de l'expanseur de macros est de générer une représentation
+ intermédiaire simple qu'il sera facile d'analyser.
+ Cette représentation intermédiaire est caractérisée par l'utilisation du
+ symbole «pour cent» devant les formes primitives.
+\end_layout
+
+\begin_layout Standard
+Pour faire cette transformation, la fonction expand remplace les expressions
+ non-primitives à l'aide d'un environnement contenant des macros prédéfinies.
+ Cette fonction définit comment se fait le remplacement des formes non-primitive
+s et comment se propage l'expansion sur les formes primitives.
+\end_layout
+
+\begin_layout Subsection*
+Expanseur de macro comme mécannisme d'analyse suntaxique
+\end_layout
+
+\begin_layout Subsubsection*
+Propriétés liés à l'expansion de macros
+\end_layout
+
+\begin_layout Enumerate
+Une macro qui test si le code qu'elle reçoit est correct génèrera du code
+ correct.
+\end_layout
+
+\begin_layout Enumerate
+Tout code passe passe par l'expanseur de macro.
+\end_layout
+
+\begin_layout Enumerate
+L'expanseur de macro doit conserver des données sur les environnements
+\end_layout
+
+\begin_layout Standard
+Ces trois propriétés sont à la base de l'idée d'utiliser les macros pour
+ analyser la syntaxe du programme.
+ Comme ont a vu précédement, on utilise l'expanseur de macro pour générer
+ la représentation intermédiaire.
+ Lorsque cette transformation est faite, toutes les informations nécessaire
+ à l'analyse syntaxique son présentes.
+\end_layout
+
+\begin_layout Standard
+Pour effectuer l'analyse on met à profit l'associateur de patron définit
+ comme la forme match utilisé à l'intérieur de macros définies dans la variable
+ environement.
+\end_layout
+
+\begin_layout Standard
+
+\family typewriter
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(cons 'let
+\end_layout
+
+\begin_layout Plain Layout
+
+ (make-env-record 'macro
+\end_layout
+
+\begin_layout Plain Layout
+
+  (lambda (expression)
+\end_layout
+
+\begin_layout Plain Layout
+
+   (match expression
+\end_layout
+
+\begin_layout Plain Layout
+
+    ((_ bindings .
+ expressions)
+\end_layout
+
+\begin_layout Plain Layout
+
+     where (or (bindings? bindings)
+\end_layout
+
+\begin_layout Plain Layout
+
+               (error "ill-formed bindings in let"))
+\end_layout
+
+\begin_layout Plain Layout
+
+     (let ((binding-names (map car bindings))
+\end_layout
+
+\begin_layout Plain Layout
+
+           (binding-expressions (map cadr bindings)))
+\end_layout
+
+\begin_layout Plain Layout
+
+       `((lambda ,binding-names %body ,expressions)
+\end_layout
+
+\begin_layout Plain Layout
+
+         ,@binding-expressions)))
+\end_layout
+
+\begin_layout Plain Layout
+
+    (_ (error "ill-formed let"))))))
+\end_layout
+
+\end_inset
+
+
+\family default
+L'associateur de patron nous permet de facilement tester la structure d'une
+ expression et on utilise la clause where du patron pour effectuer des tests
+ sur la forme des différentes expressions constituantes et ainsi rapporter
+ des erreurs plus précises.
+ Un cas par défaut nous permet facilement de rapporter une expression mal
+ formée.
+ 
+\end_layout
+
+\begin_layout Standard
+Les macros définies de la sorte ne prennent pas en compte l'environnement.
+ S'il se trouve à être nécessaire, il serait facile de l'ajouter en paramètre
+ et d'ajouter des test supplémentaires.
+ La fonction qui s'occupe de la propagation de l'expansion semble pour l'instant
+ suffisante pour repérer les erreurs nécessitant une analyse de l'environnement.
+\end_layout
+
+\begin_layout Subsubsection*
+Problèmes rencontré dans l'analyse syntaxique.
+\end_layout
+
+\begin_layout Standard
+Comme l'analyseur de syntaxe de la phase précédente a été abandonné au profit
+ de l'expanseur de macros, certains tests sont peut-être absents.
+ Cette lacune est dû à une priorité mise sur la génération de programme
+ correct pour du code correct.
+ Il reste neanmoins trivial avec l'architecture actuelle d'ajouter les tests
+ qui rejeterons les mauvais programmes.
+\end_layout
+
+\begin_layout Subsection*
+Gestion de define et define macro
+\end_layout
+
+\begin_layout Standard
+Un problème rencontré par l'expanseur de macro à été la gestion des formes
+ define et define-macro.
+ Ces formes sont problématiques dû au fait que leur expansion dépend de
+ l'expression où elles sont définies.
+\end_layout
+
+\begin_layout Standard
+Selon la spécification du langage scheme r6rs, les formes define et define
+ macro peuvent être entrelacé par des expressions, alors que les mêmes formes
+ à l'intérieur de lambda et de let (let* et letrec inclus) doivent être
+ à la tête de leur corps.
+\end_layout
+
+\begin_layout Standard
+Pour différencier ces deux cas lors de l'expansion, le compilateur génère
+ deux instructions.
+ Un programme se trouve généralement dans une expression %toplevel.
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(%toplevel
+\end_layout
+
+\begin_layout Plain Layout
+
+  {<expression> | <definition> | <definition de macro>})
+\end_layout
+
+\end_inset
+
+L'autre instruction, %body, est généré lors de l'expansion des formes lambda
+ et let (let* et letrec non-inclus puisqu'il sont expansé vers let).
+\end_layout
+
+\begin_layout Standard
+\begin_inset listings
+inline false
+status open
+
+\begin_layout Plain Layout
+
+(%lambda <liste-arg> (%body <liste-expressions>))
+\end_layout
+
+\begin_layout Plain Layout
+
+(%let <liste-associations>
+\end_layout
+
+\begin_layout Plain Layout
+
+  (%body <liste-expressions>))
+\end_layout
+
+\end_inset
+
+Lorsque c'est formes sont rencontrées, l'expanseur appelle respectivement
+ les fonctions expand-toplevel et expand-body.
+ En pratique, l'expansion de ces formes pourrait se faire par la variables
+ environnment, mais la complexité de ces cas fait qu'il est peut-être mieux
+ de le garder à l'extérieur.
+\end_layout
+
+\begin_layout Section*
+Modèle mémoire et objets
+\end_layout
+
+\begin_layout Subsection*
+Allocation
+\end_layout
+
+\begin_layout Standard
+Au début du déroulement d'un programme compilé, 4 mégaoctets de mémoire
+ sont alloués pour la durée de l'exécution du programme.
+ Comme le compilateur ne possède pas encore de garbage collector on ne peut
+ se limiter qu'à remplir progessivement cet espace, en espérant que les
+ programmes soient assez petits pour ne pas dépasser cette capacité.
+\end_layout
+
+\begin_layout Standard
+Lors de l'allocation d'un objet, 16 octets sont tout de suite réservés,
+ 8 pour la longueur de l'objet (en octets) et 8 pour le type de l'objet
+ (un entier unique à chaque type).
+ Puis un certain nombre de mots de 8 octets sont réservés pour les données
+ selon la nature de l'objet.
+ Par exemple pour une chaîne de caractères, on alloue plus de mémoire que
+ nécessaire pour que la fin de l'objet soit alignée sur un mot.
+\end_layout
+
+\begin_layout Standard
+La manoeuvre pour réserver de l'espace se limite à incrémenter le pointeur
+ d'allocation, usuellement dans un régistre.
+ Cela laisse place à l'implémentation d'un garbage collector du genre stop-and-c
+opy, qui parcours la mémoire à la recherche d'objets inutilisés une fois
+ que le pointeur d'allocation dépasse une certaine borne.
+\end_layout
+
+\begin_layout Standard
+Le pointeur vers le 
+\begin_inset Quotes eld
+\end_inset
+
+millieu
+\begin_inset Quotes erd
+\end_inset
+
+ de l'objet est ensuite retourné pour être utilisé, le millieu désignant
+ le début de la plage de données de l'objet, incrémenté de 1 (voir section
+ sur l'encodage des objets), ou de 2 pour les paires (idem).
+\end_layout
+
+\begin_layout Subsection*
+Types et encodage d'objets
+\end_layout
+
+\begin_layout Standard
+Toutes les valeurs manipulées dans les programmes compilés sont des mots
+ de 8 octets, elles peuvent représenter de manière générale un entier, un
+ objet, une paire ou une valeur spéciale, comme les booléens vrai et faux.
+\end_layout
+
+\begin_layout Standard
+Pour différencier entre ces 4 catégories d'objet, les deux bits les moins
+ significatifs des valeurs sont utilisées pour encoder chaque classe de
+ valeur.
+\end_layout
+
+\begin_layout Standard
+Plus particulièrement, les entiers sont encodés avec 
+\begin_inset Formula $00_{2}$
+\end_inset
+
+ (ce qui les multiplie par 4, et ne complique pas trop les calculs), les
+ objets avec 
+\begin_inset Formula $01_{2}$
+\end_inset
+
+, les paires avec 
+\begin_inset Formula $10_{2}$
+\end_inset
+
+, et les valeurs spéciales par 
+\begin_inset Formula $11_{2}$
+\end_inset
+
+.
+\end_layout
+
+\begin_layout Subsubsection*
+Paires
+\end_layout
+
+\begin_layout Standard
+Un des premiers objets utiles à implanter sont les paires.
+ Lors de l'appel de la fonction 
+\family typewriter
+cons
+\family default
+ un objet est alloué en mémoire de longueur 16 (donc 32 octets sont alloués),
+ le premier mot de données contient la valeur du champ 
+\family typewriter
+car
+\family default
+ de l'objet, et le deuxième mot la valeur du champ 
+\family typewriter
+cdr
+\family default
+.
+\end_layout
+
+\begin_layout Standard
+Comme mentionné précédemment, la valeur d'une paire est 
+\begin_inset Quotes eld
+\end_inset
+
+taguée
+\begin_inset Quotes erd
+\end_inset
+
+ par les bits 
+\begin_inset Formula $10_{2}$
+\end_inset
+
+.
+ Cela veut dire qu'à la place d'être le pointeur vers l'adresse mémoire
+ alloué pour la paire, c'est un pointeur vers 2 octets plus loin.
+ Ce choix implique de calculer les bons décalages, par exemple pour aller
+ chercher le champ 
+\family typewriter
+car
+\family default
+ il faut faire 
+\family typewriter
+mov -2(%R1),%R2
+\family default
+ et non 
+\family typewriter
+mov (%R1),%R2
+\family default
+ si R1 contient la valeur taguée de la paire.
+\end_layout
+
+\begin_layout Standard
+Ce choix à été fait car la paire est un objet très utilisé en Scheme et
+ donc il est pratique de pouvoir la détecter facilement et de pouvoir optimiser
+ la lecteur et l'écriture de ses champs.
+\end_layout
+
+\begin_layout Standard
+Il aurait été possible de tout simplement allouer des paires alignées sur
+ des adresses qui se terminent par 
+\begin_inset Formula $10_{2}$
+\end_inset
+
+, mais cela aurait probablement été inefficace car les processeurs modernes
+ sont concus pour manipulées des valeurs alignées sur les mots, soit 8 octets
+ dans le cas de x86-64.
+\end_layout
+
+\begin_layout Subsubsection*
+Objets en général
+\end_layout
+
+\begin_layout Standard
+Comme pour les paires, les objets utilisent un tag pour reconnaitre la classe
+ d'un valeur donnée comme étant un pointeur vers un objet.
+ Les objets utilisent le tag 
+\begin_inset Formula $01_{2}$
+\end_inset
+
+, ce qui veut dire que le bon décalage est -1 lors d'accès aux données.
+\end_layout
+
+\begin_layout Subsubsection*
+Chaînes de caractères
+\end_layout
+
+\begin_layout Standard
+Comme mentionnée précédemment elles sont allouées dans la plage de données
+ d'un objet, et se terminent par un octet nul (car l'espace alloué est généralem
+ent plus grand que la chaîne afin de respecter l'alignement sur les mots)
+\end_layout
+
+\begin_layout Subsubsection*
+Symboles
+\end_layout
+
+\begin_layout Standard
+Les symboles sont des objets dont la plage de données est une chaîne de
+ caractères, mais dont le type est différent de celui de ces dernières.
+ De plus ils sont gardés dans un liste d'association (au runtime) afin de
+ conserver leur unicité.
+\end_layout
+
+\begin_layout Subsubsection*
+Caractères
+\end_layout
+
+\begin_layout Standard
+Les caractères uniques sont aussi encodés en mémoire, mais il aurait fallu
+ les encoder comme valeur spéciale pour gagner en temps et en vitesse.
+\end_layout
+
+\begin_layout Subsubsection*
+Liste vide
+\end_layout
+
+\begin_layout Standard
+La liste vide est représentée par un symbole non-interné, mais il aurait
+ aussi fallu l'encoder comme une valeur spéciale puisque c'en est un autre
+ qui revient souvent.
+\end_layout
+
+\begin_layout Subsubsection*
+Procédures et fermetures
+\end_layout
+
+\begin_layout Standard
+Les procédures sont représentées par des objets, ayant comme premier mot
+ de donnée l'adresse de la lambda expression compilée.
+ Les fermetures contiennent en plus la valeur des variables libres lors
+ de la création de la fermeture dans les champs suivants (voir section sur
+ les fermetures).
+\end_layout
+
+\begin_layout Section*
+Fermetures
+\end_layout
+
+\begin_layout Subsection*
+Encodage des fermetures
+\end_layout
+
+\begin_layout Standard
+Au runtime, les fermetures sont encodées telles que les variables libres
+ auquelles elles font référence sont stockées dans l'objet fermeture, qui
+ est passé dans un registre donné au moment de l'appel de la lambda expression,
+ pour que celle-ci puisse aller les chercher convenablement.
+\end_layout
+
+\begin_layout Subsection*
+Compilation des fermetures
+\end_layout
+
+\begin_layout Standard
+À la compilation on détecte l'ensemble des variables libres (free variables,
+ 
+\begin_inset Formula $FV$
+\end_inset
+
+) en suivant cette convention:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Formula 
+\begin{eqnarray*}
+FV(c) & = & \{\}\text{ pour \ensuremath{c}une constance }\\
+FV(x) & = & \{x\}\text{ pour \ensuremath{x}un symbole}\\
+FV((\lambda\;(p_{1}...p_{n})\; E)) & = & FV(E)\backslash\{p_{1},...,p_{n}\}\\
+FV(\;(E_{0}\; E_{1}...)) & = & \bigcup_{i}FV(E_{i})
+\end{eqnarray*}
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Lorsqu'on trouve une lambda expression qui doit être évaluée, on vérifie
+ si cet ensemble est vide.
+ S'il ne l'est pas, lors de la création de l'objet fermeture on rajoute
+ la valeur des variables libres au moment de la création dans les données
+ de l'objet.
+\end_layout
+
+\begin_layout Subsubsection*
+Tentative de conversion source-à-source
+\end_layout
+
+\begin_layout Standard
+Le problème de la méthode précédente est qu'elle ne permet réellement la
+ modification des valeurs.
+ Pour pallier a ce problème nous avons essayé de faire la transformation
+ source-à-source qui converti les variables libres vers des paires, et leur
+ accès à des car/set-car!.
+ Malheureusement nous n'avons pu implémenter cette solution correctement
+ et avons du la laisser tomber momentanément.
+\end_layout
+
+\begin_layout Section*
+Compilation just-in-time
+\end_layout
+
+\begin_layout Standard
+Bien que non fonctionnelle pour le moment, une bonne partie du travail a
+ été effectué pour permettre la compilation et l'exécution 
+\begin_inset Quotes eld
+\end_inset
+
+just-in-time
+\begin_inset Quotes erd
+\end_inset
+
+ du code Scheme.
+ 
+\end_layout
+
+\begin_layout Subsection*
+Encodage des instructions
+\end_layout
+
+\begin_layout Standard
+Les instructions sont encodées vers une représentation en tableau d'octets
+ à partir de leur représentation en s-expression (qui est une des représentation
+ intermédiaires du compilateur normal).
+\end_layout
+
+\begin_layout Subsubsection*
+Encodage des sauts
+\end_layout
+
+\begin_layout Standard
+Comme on ne connait pas d'avance l'adresse relative ou absolue de leur destinati
+on, les diverses instructions jumps sont encodées en deux temps.
+ Quand on les recontre on laisse une place vide dans les instructions encodées
+ et on y garde une référence dans une liste.
+ À la fin de la première étape, on parcours cette liste pour venir chercher
+ l'adresse relative au saut et la placer au bon endroit dans le code compilé.
+\end_layout
+
+\begin_layout Subsubsection*
+Encodage des instructions avec immédiats
+\end_layout
+
+\begin_layout Standard
+En général, on prends de manière paresseuse l'encodage des instructions
+ où il y a une valeur immédiate avec la plus grande taille d'immédiat possible.
+ Cela simplifie le code et évite plusieurs problèmes, notemment le fait
+ que (par exemple dans le cas d'un label) on ne connait pas forcément la
+ valeur d'avance.
+\end_layout
+
+\begin_layout Subsection*
+Exécution
+\end_layout
+
+\begin_layout Standard
+Pour exécuter le tableau d'octets résultant de la compilation JIT, on alloue
+ un espace de mémoire exécutable dans lequel on copie les instructions.
+\end_layout
+
+\begin_layout Standard
+Idéalement, et dans le futur, un index des adresses réelles des variables
+ globales déclarées dans chaque bloc compilé seraient gardés, pour pouvoir
+ facilement y faire référence dans d'autres compilations JIT lors de la
+ même exécution (par exemple pour faire un eval qui compile en utilisant
+ le compilateur compilé).
+\end_layout
+
+\begin_layout Section*
+Librairie standard
+\end_layout
+
+\begin_layout Standard
+Un librairie standard existe maintenant et fournit les fonctions et les
+ macros les plus communes de Scheme.
+ Dans cette librairie, certaines fonctions sont écrites en assembleur soit
+ pour des raisons de performances, soit parce que ce soit des fonctions
+ de base qu'on doit écrire de cette manière, notemment les fonctions pour
+ manipuler les objets (par exemple %object-new, %object-getq, etc).
+\end_layout
+
+\begin_layout Standard
+La librairie standard permet entres autres de manipuler les paires (avec
+ cons, car, cdr, caa..ddr), les listes (length, list-ref, ...) , les chaînes
+ de caractères et les symboles (string->symbol, symbol->string), et permet
+ aussi l'affichage de ces valeurs (display, print, ...), en plus des valeurs
+ telles que les entiers et les booléens.
+\end_layout
+
+\end_body
+\end_document
